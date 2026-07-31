@@ -17,6 +17,12 @@
 dskcode is a **terminal-native AI coding assistant** built on DeepSeek. It understands your code, reads and writes files, executes commands, and collaborates with you—all directly in your terminal.
 
 ```bash
+# Recommended: use npx, no install required
+npx dskcode
+```
+
+```bash
+# Or install globally
 npm install -g dskcode
 ```
 
@@ -55,8 +61,8 @@ Yes. The `providers` config points to your chosen model. When DeepSeek releases 
 </table>
 
 ```bash
-# Start an interactive session
-dskcode
+# Start an interactive session (recommended: use npx)
+npx dskcode
 ```
 
 <details>

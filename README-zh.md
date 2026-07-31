@@ -17,6 +17,12 @@
 dskcode 是一个**终端原生 AI 编程助手**，基于 DeepSeek 构建。它直接在终端中理解你的代码、读写文件、执行命令，与你协作编码。
 
 ```bash
+# 推荐使用 npx，无需安装
+npx dskcode
+```
+
+```bash
+# 或全局安装
 npm install -g dskcode
 ```
 
