@@ -10,7 +10,7 @@
 [![Downloads](https://img.shields.io/npm/dt/dskcode.svg?style=flat&colorA=000000&colorB=000000)](https://npmjs.com/package/dskcode)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat&colorA=000000&colorB=000000)](https://nodejs.org)
 
-> **[English]('https://github.com/Awu12277/dskcode/blob/main/README.md')** · [中文文档]('https://github.com/Awu12277/dskcode/blob/main/README-zh.md')
+> **[English](https://github.com/Awu12277/dskcode/blob/main/README.md)** · **[中文文档](https://github.com/Awu12277/dskcode/blob/main/README-zh.md)**
 
 <img src="https://raw.githubusercontent.com/Awu12277/pic_go/refs/heads/main//dskcode-logo.gif" width="100%" />
 
