@@ -1,0 +1,169 @@
+// ---------------------------------------------------------------------------
+// read_file 工具 — 读取指定路径的文件内容
+// ---------------------------------------------------------------------------
+
+import { readFile, stat, open } from "node:fs/promises";
+import { relative } from "node:path";
+import { ToolKind, type AgentTool, type ToolContext, type ToolResult } from "../types.js";
+import { resolvePath, truncateOutput } from "../sandbox.js";
+import { toLf } from "../eol.js";
+
+/** read_file 工具的参数格式 */
+export interface ReadFileArgs {
+  /** 文件路径（相对于 cwd 或绝对路径） */
+  path: string;
+  /** 起始行号（1-based），默认 1 */
+  startLine?: number;
+  /** 结束行号（1-based，包含），默认到文件末尾 */
+  endLine?: number;
+}
+
+/** 读取前 N 字节检测是否为二进制文件 */
+async function checkBinary(filePath: string): Promise<boolean> {
+  const fileHandle = await open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(8192); // 8KB
+    const { bytesRead } = await fileHandle.read(buffer, 0, 8192, 0);
+    return buffer.subarray(0, bytesRead).includes(0); // NUL 字节 → 二进制
+  } finally {
+    await fileHandle.close();
+  }
+}
+
+/**
+ * read_file 工具 — 读取文件内容，支持行号范围选择。
+ *
+ * 功能：
+ * - 按行号范围读取部分内容
+ * - 自动添加行号前缀（→ 分隔）
+ * - 文件大小限制（默认 10MB）
+ * - 输出长度截断（默认 50K 字符）
+ * - 二进制检测（阻止读取二进制文件）
+ */
+export const readFileTool: AgentTool<ReadFileArgs> = {
+  name: "read_file",
+  kind: ToolKind.Read,
+  description:
+    "读取指定路径的文件内容。支持行号范围选择，输出带行号。适用于查看源代码、配置文件等文本文件。自动拒绝二进制文件。",
+  parameters: {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description: "文件路径（相对于当前工作目录或绝对路径）",
+      },
+      startLine: {
+        type: "number",
+        description: "起始行号（从 1 开始），默认为 1",
+      },
+      endLine: {
+        type: "number",
+        description: "结束行号（包含），默认到文件末尾",
+      },
+    },
+    required: ["path"],
+    additionalProperties: false,
+  },
+
+  async execute(args: ReadFileArgs, ctx: ToolContext): Promise<ToolResult> {
+    if (!args?.path || typeof args.path !== "string") {
+      return { success: false, data: "缺少必要参数 path", error: "INVALID_ARGS" };
+    }
+
+    const filePath = resolvePath(args.path, ctx.cwd);
+    const relPath = relative(ctx.cwd, filePath).replace(/\\/g, "/");
+
+    try {
+      // 检查文件大小
+      const fileStat = await stat(filePath);
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (fileStat.size > maxSize) {
+        return {
+          success: false,
+          data: `文件过大（${(fileStat.size / 1024 / 1024).toFixed(1)}MB），超过 10MB 限制`,
+          error: "FILE_TOO_LARGE",
+        };
+      }
+
+      // 检查是否为目录
+      if (fileStat.isDirectory()) {
+        return {
+          success: false,
+          data: `"${filePath}" 是一个目录，请使用 ls 工具查看目录内容`,
+          error: "IS_DIRECTORY",
+        };
+      }
+
+      // 二进制检测：扫描前 8KB 看是否包含 NUL 字节
+      if (fileStat.size > 0) {
+        const isBin = await checkBinary(filePath);
+        if (isBin) {
+          return {
+            success: false,
+            data: `"${filePath}" 看起来是二进制文件，不支持读取`,
+            error: "BINARY_FILE",
+          };
+        }
+      }
+
+      // 空文件直接以 0 行处理，避免 `"".split("\n") === [""]` 被渲染成 "1→" 伪行
+      if (fileStat.size === 0) {
+        return {
+          success: true,
+          data: "(空文件)",
+          summary: `📖 ${relPath}（0 行）`,
+        };
+      }
+
+      const content = await readFile(filePath, "utf-8");
+      // 按 LF 归一化后拆行：CRLF 文件每行末尾不再残留 `\r`，展示干净，
+      // 也与 edit_file / multi_edit / delete_range 的 LF 归一化匹配保持一致
+      // —— LLM 看到什么就能直接拿去作 old_text/锚点。
+      const split = toLf(content).split("\n");
+      // 文本以 "\n" 结尾时 split 会多出一个空串，pop 掉以还原真实行数
+      const lines =
+        split.length > 0 && split[split.length - 1] === "" && content.endsWith("\n")
+          ? split.slice(0, -1)
+          : split;
+
+      // 行号范围处理（1-based → 0-based）
+      const startLine = Math.max(1, args.startLine ?? 1) - 1;
+      const endLine = args.endLine ? Math.min(args.endLine, lines.length) : lines.length;
+      const selectedLines = lines.slice(startLine, endLine);
+
+      // 添加行号前缀（右对齐 + →）
+      const lineNumWidth = String(endLine).length;
+      const result = selectedLines
+        .map(
+          (line, i) => `${String(startLine + i + 1).padStart(lineNumWidth, " ")}→${line}`,
+        )
+        .join("\n");
+
+      // 尾部提示：告知剩余行数
+      const remaining = lines.length - endLine;
+      const tailHint =
+        remaining > 0
+          ? `\n\n[还有 ${remaining} 行；使用 startLine=${endLine + 1} 继续查看]`
+          : "";
+
+      // UI 摘要：仅显示路径与行数范围，避免把文件内容塞进 UI
+      const rangeLabel =
+        startLine > 0 || endLine < lines.length
+          ? `第 ${startLine + 1}-${endLine} 行`
+          : `${lines.length} 行`;
+
+      return {
+        success: true,
+        data: truncateOutput(result) + tailHint,
+        summary: `📖 ${relPath}（${rangeLabel}）`,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        success: false,
+        data: `读取文件失败：${message}`,
+        error: "READ_ERROR",
+      };
+    }
+  },
+};

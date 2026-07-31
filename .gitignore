@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.tsbuildinfo
+.DS_Store
+
+# 一次性联调脚本产物
+scripts/voice-probe/node_modules/
+scripts/voice-probe/package-lock.json
